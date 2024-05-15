@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2015-2018 Andreas Redmer <ar-appleflinger@abga.be>
+ * Copyright (C) 2015-2023 Andreas Redmer <ar-appleflinger@abga.be>
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -37,6 +37,7 @@ import com.gitlab.ardash.appleflinger.global.Assets.TextureAsset;
 import com.gitlab.ardash.appleflinger.global.GameManager;
 import com.gitlab.ardash.appleflinger.global.GameState;
 import com.gitlab.ardash.appleflinger.global.MaterialConfig;
+import com.gitlab.ardash.appleflinger.global.PlayerStatus;
 import com.gitlab.ardash.appleflinger.helpers.SoundPlayer;
 import com.gitlab.ardash.appleflinger.i18n.I18N;
 
@@ -49,10 +50,10 @@ public class ProjectileActor extends CircleActor {
 	/**
 	 * keep a reference to the sling, so in can be told to release after the shot.
 	 */
-	private SlingShotActor slingShotActor;
+	public SlingShotActor slingShotActor;
 	
-	private final float shotForceMultiplyer = 4000f; // good for adjusted gravity
-	private final float maxPullDistance = 0.8f; // good for adjusted gravity
+	public final float shotForceMultiplyer = 4000f; // good for adjusted gravity
+	public final float maxPullDistance = 0.8f; // good for adjusted gravity
 	
 	private static final float maxLifetime = 10f;
 	private float lifetime = 0;
@@ -77,103 +78,127 @@ public class ProjectileActor extends CircleActor {
 
 		//reference for the listener
 		final PhysicsActor caller = this;
-		
-		this.addListener(new InputListener(){
-			private final Vector2 lastTouchDown = new Vector2(0,0);
-			private final Vector2 shootDirection = new Vector2(0,0);
-			
-			boolean pullSoundPlayed = false;
 
-			@Override
-			public boolean touchDown(InputEvent event, float x, float y,
-					int pointer, int button) {
-				GameManager gm = GameManager.getInstance();
-				if (GameManager.DEBUG)
-					System.out.println("touchDown"+x +","+y);  
-				lastTouchDown.set(body.getTransform().getPosition().cpy());
-				removePhysics();
-				gm.setGameState(GameState.DRAGGING);
-				 pullSoundPlayed = false;
-				return true;
-			}
-			@Override
-			public void touchDragged(InputEvent event, float x, float y,
-					int pointer) {
-				super.touchDragged(event, x, y, pointer);
-				
-				// to drag the projectile is must be connected to a slingshot
-				if (slingShotActor == null)
-					return;
-				
-				if (!pullSoundPlayed)
-				{
-					SoundPlayer.playSound(Assets.getRandomSound(SoundGroupAsset.RUBBER),0.25f);
-					pullSoundPlayed = true;
-				}
-				
-				final Vector2 rampCenterPoint = slingShotActor.getSlingShotCenter();
-				
-        		event.setBubbles(false);
+		if (!GameManager.SANDBOX && !GameManager.ANALOG_INPUT) {
+			this.addListener(new InputListener(){
+					final GameManager gm = GameManager.getInstance();
+					private final Vector2 shootDirection = new Vector2(0,0);
+					boolean pullSoundPlayed = false;
 
-				final Vector2 moveTarget= new Vector2(event.getStageX(), event.getStageY());
-				final Vector2 moveVector = moveTarget.cpy().sub(rampCenterPoint);
-				final float rampDist = rampCenterPoint.dst(moveTarget);
-				if (Math.abs(rampDist)>maxPullDistance)
-				{
-					// too far
-					moveVector.clamp(-maxPullDistance, maxPullDistance);
-					final Vector2 moveDest = rampCenterPoint.cpy().add(moveVector);
-					body.setTransform(moveDest,0);
-				}
-				else
-				{
-					// normal
-					body.setTransform(moveTarget,0);
-				}
-				shootDirection.set(rampCenterPoint.cpy().sub(body.getTransform().getPosition()));
+					/**
+					 * when pulled far away, trigger an offset to the finger, so apple doesn't need to be touched directly,
+					 * this offset increases slightly over time until a specified max
+					 */
+					private final Vector2 touchOffset = new Vector2(0,0);
 
-				if (GameManager.DEBUG)
-				{
-					System.out.print(" angle "+moveVector.angle());
-					System.out.print(" sin "+MathUtils.sin(moveVector.angleRad()));
-					System.out.println(" cos "+MathUtils.cos(moveVector.angleRad()));
-				}
-			}
-			@Override
-			public void touchUp(InputEvent event, float x, float y,
-					int pointer, int button) {
-				super.touchUp(event, x, y, pointer, button);
-				final GameManager gm = GameManager.getInstance();
-				// this event comes in twice in a row -- dont do anything if status is always waiting for physics
-				if (gm.getGameState()==GameState.WAIT_FOR_PHYSICS)
-					return;
-				// SHOOT !!!
-				caller.setTouchable(Touchable.disabled);
-				// disable touchablity of the game scene
-				gm.getInputMultiplexer().removeProcessor(gm.currentGameScreen.getRenderer().world.stage);
-				gm.getInputMultiplexer().addProcessor(gm.currentGameScreen.getGuiStage());
-				gm.currentGameScreen.setAnnouncementText(I18N.getString("pleaseWait")+" ...", true); 
-				gm.onShotFired();
-				SoundPlayer.playSound(Assets.getRandomSound(SoundGroupAsset.WHIZZ), 0.25f);
-				reAddPhysics();
-				body.setGravityScale(1.0f);
+					/**
+					 * true, when the user pulled one time out of the maxPullDistance
+					 */
+					boolean wasRampProximityLeft = false;
+
+					@Override
+					public boolean touchDown(InputEvent event, float x, float y,
+											 int pointer, int button) {
+						if (GameManager.DEBUG)
+							System.out.println("touchDown"+x +","+y);  
+						removePhysics();
+						gm.setGameState(GameState.DRAGGING);
+						pullSoundPlayed = false;
+						return true;
+					}
+					@Override
+					public void touchDragged(InputEvent event, float x, float y,
+											 int pointer) {
+						super.touchDragged(event, x, y, pointer);
 				
-				GameManager.recordPullVector(shootDirection.cpy().scl(-1f));
-				if (GameManager.DEBUG)
-					System.out.println(shootDirection);
+						// to drag the projectile is must be connected to a slingshot
+						if (slingShotActor == null)
+							return;
+				
+						if (!pullSoundPlayed)
+						{
+							SoundPlayer.playSound(Assets.getRandomSound(SoundGroupAsset.RUBBER),0.25f);
+							pullSoundPlayed = true;
+						}
+				
+						final Vector2 rampCenterPoint = slingShotActor.getSlingShotCenter();
+						event.setBubbles(false);
+						final Vector2 moveTarget= new Vector2(event.getStageX(), event.getStageY());
+
+						if (wasRampProximityLeft) {
+							//	        		System.out.println(" to " + touchOffset + " len2 " + touchOffset.len2());
+							moveTarget.add(touchOffset);
+							if (touchOffset.len2()<= 0.53f) {
+								final float offsetAdjust = 0.005f;
+								// move the projectile slightly next to the finger
+								if (gm.currentPlayer == gm.PLAYER1){
+									touchOffset.add(offsetAdjust, offsetAdjust);
+								}
+								if (gm.currentPlayer == gm.PLAYER2 && ! gm.isPlayer2CPU()){
+									touchOffset.add(-offsetAdjust, offsetAdjust);
+								}
+							}
+						}
+
+						final Vector2 moveVector = moveTarget.cpy().sub(rampCenterPoint);
+						final float rampDist = rampCenterPoint.dst(moveTarget);
+						if (Math.abs(rampDist)>maxPullDistance)
+						{
+							wasRampProximityLeft = true;
+							// too far
+							moveVector.clamp(-maxPullDistance, maxPullDistance);
+							final Vector2 moveDest = rampCenterPoint.cpy().add(moveVector);
+							body.setTransform(moveDest,0);
+						}
+						else
+						{
+							// normal
+							body.setTransform(moveTarget,0);
+						}
+						shootDirection.set(rampCenterPoint.cpy().sub(body.getTransform().getPosition()));
+
+						if (GameManager.DEBUG)
+						{
+							System.out.print(" angle "+moveVector.angle());
+							System.out.print(" sin "+MathUtils.sin(moveVector.angleRad()));
+							System.out.println(" cos "+MathUtils.cos(moveVector.angleRad()));
+						}
+					}
+					@Override
+					public void touchUp(InputEvent event, float x, float y,
+										int pointer, int button) {
+						super.touchUp(event, x, y, pointer, button);
+						final GameManager gm = GameManager.getInstance();
+						// this event comes in twice in a row -- dont do anything if status is always waiting for physics
+						if (gm.getGameState()==GameState.WAIT_FOR_PHYSICS)
+							return;
+						// SHOOT !!!
+						caller.setTouchable(Touchable.disabled);
+						// disable touchablity of the game scene
+						gm.getInputMultiplexer().removeProcessor(gm.currentGameScreen.getRenderer().world.stage);
+						gm.getInputMultiplexer().addProcessor(gm.currentGameScreen.getGuiStage());
+						gm.currentGameScreen.setAnnouncementText(I18N.getString("pleaseWait")+" ...", true); 
+						gm.onShotFired();
+						SoundPlayer.playSound(Assets.getRandomSound(SoundGroupAsset.WHIZZ), 0.25f);
+						reAddPhysics();
+						body.setGravityScale(1.0f);
+				
+						GameManager.recordPullVector(shootDirection.cpy().scl(-1f));
+						if (GameManager.DEBUG)
+							System.out.println(shootDirection);
 					
-				body.applyForceToCenter(shootDirection.scl(shotForceMultiplyer), true);
+						body.applyForceToCenter(shootDirection.scl(shotForceMultiplyer), true);
 
-				gm.setGameState(GameState.WAIT_FOR_PHYSICS);
-				world.continuePhysics();
-				final OrthographicCamera camera = gm.currentGameScreen.getRenderer().getCamera();
-				camera.position.set(GameWorld.UNIT_WIDTH/2f, GameWorld.UNIT_HEIGHT/2f,0);
-				startLifetime();
-        		if (slingShotActor != null)
-        			slingShotActor.releaseProjectile();
-			}
-		});
-
+						gm.setGameState(GameState.WAIT_FOR_PHYSICS);
+						world.continuePhysics();
+						final OrthographicCamera camera = gm.currentGameScreen.getRenderer().getCamera();
+						camera.position.set(GameWorld.UNIT_WIDTH/2f, GameWorld.UNIT_HEIGHT/2f,0);
+						startLifetime();
+						if (slingShotActor != null)
+							slingShotActor.releaseProjectile();
+					}
+				});
+		}
 	}
 	
 	@Override  
@@ -215,7 +240,7 @@ public class ProjectileActor extends CircleActor {
 		this.slingShotActor = slingShotActor;
 	}
 	
-	private void startLifetime()
+	public void startLifetime()
 	{
 		lifetimeStarted=true;
 	}

@@ -45,7 +45,7 @@ public abstract class PhysicsActor extends Image {
 
 	private static long _nextid=1;
 	private final long _id;
-	protected final GameWorld world;
+	public final GameWorld world;
 	public Body body;
 	protected final BodyType bodyType;
 	protected final MaterialConfig mc;
@@ -212,7 +212,7 @@ public abstract class PhysicsActor extends Image {
 		isPhysicsRemoved = true;
 	}
 
-	protected void reAddPhysics() {
+	public void reAddPhysics() {
 		isPhysicsRemoved =false;
 		resetPhysics(mc, body.getTransform().getPosition().x, body.getTransform().getPosition().y, body.getAngle(), bodyType);
 	}

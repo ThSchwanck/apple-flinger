@@ -95,6 +95,11 @@ project(":core") {
         api "com.badlogicgames.gdx:gdx:$gdxVersion"
         api "com.badlogicgames.gdx:gdx-freetype:$gdxVersion"
         api "com.badlogicgames.gdx:gdx-box2d:$gdxVersion"
+    	implementation 'org.slf4j:slf4j-api:1.7.35'
+    	implementation 'org.slf4j:slf4j-simple:1.7.35'
+    	implementation 'com.pi4j:pi4j-core:2.3.0'
+        implementation 'com.pi4j:pi4j-plugin-linuxfs:2.3.0'
+        implementation 'com.pi4j:pi4j-plugin-raspberrypi:2.3.0'
     }
 }
 
@@ -120,6 +125,10 @@ project(":tests") {
          testImplementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
      }
  }
+
+tasks.withType(JavaCompile) {
+    options.release = 8
+}
 
 // tasks.eclipse.doLast {
 //     delete ".project"
